@@ -1,0 +1,260 @@
+---
+title: "Lab_7"
+author: "Gustavo_Sousa"
+date: "2022-08-24"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Lab: Non-linear Modeling
+
+Esse código é uma tentativa minha de reproduzir os exemplos dado no livro Introduction to Statistical Learning (ISLR) capítulo 7 - "Moving Beyong Linearity". Comentários dentro de cada bloco de código estão em inglÊs
+
+```{r}
+library(ISLR2) #Loading the library of the book
+attach(Wage) #Importing the dataset into memmory
+```
+
+Vamos iniciar com exemplos de regressão linear polinomial e funções *step:*
+
+```{r}
+fit <- lm(wage ~ poly(age, 4), data = Wage) #geramos um modelo de regressão linear polinomial usando a variável "age" até a 4a potência para prever a variável resposta "wage"
+
+print("The estimates of each coefficient up to 4 degrees and its summary statistics:")
+coef(summary(fit))
+```
+
+Como o livro observa, a função `poly()` facilita a sintaxe da linguagem sem precisar escrever fórmulas longas x¹ + x² + x³ + ... x⁹.. etc. `poly(age,4)` retorna uma matriz ortogonal com combinações lineares de age, age², age³ e age⁴. Se quisermos literalmente age¹, age².. age⁴ precisamos sinalizar com o argumento `raw = True`:
+
+```{r}
+fit2 <- lm(wage ~poly(age, 4, raw = T), data = Wage)
+print("Literal coeficients (not orthogonal matrix):")
+coef(summary(fit2))
+```
+
+Notamos, que obviamente os coeficientes mudam, porém, como o autor observa no texto:
+
+> *Later we see that this does not affect the model in a meaningful way---though the choice of basis clearly affects the coefficient estimates, it does not affect the fitted values obtained.*
+
+Outras formas equivalentes de criar modelos de regressão polinomial usando o `I()` ou a função `cbind()`:
+
+```{r}
+#Using I() method for modelling polynomial function of age up to 4 degrees
+fit2a <- lm(wage ~ age + I(age^2) +I(age^3) + I(age^4), data = Wage)
+
+print("Coeficients of the fit wage x age^(1,4) using I():")
+coef(summary(fit2a))
+```
+
+Nós podemos observar que tanto faz usando `poly(raw = T)` ou `I()`, obtemos os mesmos coeficientes e as mesmas estatísticas.
+
+```{r}
+fit2b <- lm(wage ~ cbind(age, age^2, age^3, age^4), data = Wage)
+print("Coeficients of the fit wage ~ age^(1,4) using cbind method:")
+coef(summary((fit2b)))
+```
+
+Same same, but THE same, apesar de que `cbind()` e `poly(raw = T)` são maneiras mais compactas de se escrever na linguagem R.
+
+Criando o modelo e as sombras de erro *(2\*sd of the error upper and lower)*
+
+```{r}
+agelims <- range(age) #finding the upper and lower limits of the ages found in the data
+age.grid <- seq(from = agelims[1], agelims[2]) #creating an grid of values for predictions
+
+preds <- predict(fit, newdata = list(age = age.grid), se = T) #predicting the data
+se.bands <- cbind(preds$fit + 2*preds$se.fit, preds$fit - 2*preds$se.fit) #creating the error bars
+```
+
+Plotando os dados:
+
+```{r}
+par(mfrow = c(1,2), mar = c(4.5, 4.5, 1, 1), oma = c(0, 0, 4, 0))
+#The mar and oma arguments allow us to control the margins of the plots and the title obviouly creates a title
+
+plot(age, wage, xlim = agelims, cex = .5, col = "darkgrey")
+title("Degree-4 Polynomial", outer = T)
+lines(age.grid, preds$fit, lwd = 2, col = "blue")
+matlines(age.grid, se.bands, lwd = 1, col = "blue", lty = 3)
+```
+
+### Using ANOVA to find the best polynomial
+
+Agora nós utilizaremos ANOVA para encontrar qual a melhor ordem do polinomial.
+
+```{r}
+
+fit.1 <- lm(wage ~ age, data = Wage)
+fit.2 <- lm(wage ~ poly(age, 2), data = Wage)
+fit.3 <- lm(wage ~ poly(age, 3), data = Wage)
+fit.4 <- lm(wage ~ poly(age, 4), data = Wage)
+fit.5 <- lm(wage ~ poly(age, 5), data = Wage)
+
+anova(fit.1, fit.2, fit.3, fit.4, fit.5)
+```
+
+Nós podemos observar que a partir do modelo de ordem 4, não existe signficância estatística, ou seja, não há aumento significativo na explicação da variância dos dados por um modelo de ordem 4 ou maior. Podemos afirmar que um modelo cúbico ou quártico possuem um ajuste adequado aos dados, e acima disso não existe necessidade.
+
+Podemos utilizar a validação cruzada no lugar de ANOVA para inferirmos o melhor grau polinomial do preditor.
+
+### Polynomial logistic functions
+
+Prosseguimos para um encaixe logístico utilizando regressão polinomial com grau 4 (ou maior).
+
+```{r}
+fit_logistic <- glm(I(wage > 250) ~ poly(age, 4), data = Wage, family = binomial)
+```
+
+A expressão dentro da função `I(wage > 250)`\` retorna T ou F para aqueles dados que obedecem tal critério e podemos modelar de maneira binomial (true\|false, 1\|0).
+
+Para realizar a predição dos dados:
+
+```{r}
+preds <- predict(fit_logistic, newdata = list(age = age.grid), se = T)
+
+#In order to compute the confidence interaval bands we need to transform the predictions fitted into std deviation values
+
+pfit <- exp(preds$fit/(1 + exp(preds$fit)))
+
+#Converting into bands
+se.bands.logit <- cbind(preds$fit + 2*preds$se.fit, preds$fit - 2*preds$se.fit)
+se.bands <- exp(se.bands.logit/(1+exp(se.bands.logit)))
+```
+
+![](images/paste-F40A6423.png)
+
+(Convertendo em probabilidades (no pfit), porém ainda estou em dúvida do porquê o autor faz isso se ele não usa pra calcular as bandas.)
+
+Plotando os gŕaficos:
+
+```{r}
+plot(age,I(wage > 250), xlim = agelims, type = "n", ylim = c(0, .2))
+
+points(jitter(age), I((wage > 250)/5), cex = .5, pch = "|", col = "darkgrey")
+lines(age.grid, pfit, lwd = 2, col = "blue")
+matlines(age.grid, se.bands, lwd = 1, col = "blue", lty = 3)
+```
+
+Para realizarmos as step functions podemos utilizar numa sintaxe bastante simples o "cut" com o argumento de quantos cortes ou nós gostaríamos, nesse caso 4.
+
+```{r}
+table(cut(age,4))
+fit <- lm(wage ~cut(age,4), data = Wage)
+coef(summary(fit))
+```
+
+## Splines
+
+Vamos utilizar a *base function* `bs()` gerando uma matriz completa com nós especificados em 25, 40 e 60 e um ajuste usando um spline cúbico:
+
+```{r}
+print("This is the age.grid that we're going to use to plot the splines:")
+age.grid
+```
+
+```{r}
+library(splines) #loading the library
+
+fit <- lm(wage ~ bs(age, knots = c(25,40,60)), data = Wage) #fitting the model using splines and the knots at 25, 40, 60
+
+#predicting new datapoints
+pred <- predict(fit, newdata = list(age = age.grid), se = T)
+
+#plotting the age vs wage
+plot(age, wage, col = "gray")
+
+#ploting the line between age.grid and the predictions
+lines(age.grid, pred$fit, lwd = 2)
+lines(age.grid, pred$fit + 2*pred$se, lty = "dashed")
+lines(age.grid, pred$fit-2*pred$se, lty = "dashed")
+```
+
+Se possuímos uma spline cúbica com três nós, possuímos então por consequência, 7 graus de liberdade. Generalizando, splines cúbicas possuem K + 4 graus de liberdade. A função `bs()` possui uma característica bastante interessante: é possível selecionar os nós de maneira automática:
+
+```{r}
+#It is possibel to see which knots are selected using 6 degrees of freedom.
+attr(bs(age, df = 6), "knots")
+```
+
+Conforme podemos observar acima, a função base splines `bs()` retornou 3 nós nos quantis 25, 50 e 75, ou no primeiro, segundo e terceiro quartil.
+
+A seguir, iremos utilizar uma spline natural usando a função do R base `ns()`\`:
+
+```{r}
+fit2 <- lm(wage ~ ns(age, df = 4), data = Wage)
+pred2 <- predict(fit2, newdata = list(age = age.grid), se = T)
+
+plot(age, wage, col = "gray")
+
+#ploting the line between age.grid and the predictions
+lines(age.grid, pred$fit, lwd = 2)
+lines(age.grid, pred$fit + 2*pred$se, lty = "dashed")
+lines(age.grid, pred$fit-2*pred$se, lty = "dashed")
+#plotting the natural splines in red
+lines(age.grid, pred2$fit, col = "red", lwd = 2)
+```
+
+Nós podemos utilizar uma função mais direta do R base que é a `smooth.spline()` conforme código abaixo:
+
+```{r}
+plot(age, wage, xlim = agelims, cex = .5, col = "darkgrey")
+title("Smoothing Spline")
+fit <- smooth.spline(age, wage, df = 16) #Fitting with some arbitrary df
+fit2 <- smooth.spline(age, wage, cv = TRUE) #finding the df using cv
+
+#The df:
+print("Degrees of freedom using cross-validation: ")
+fit2$df
+
+#adding the lines of the first fit
+lines(fit, col = "red", lwd = 2)
+lines(fit2, col = "blue", lwd = 2)
+#print the legends
+legend("topright", legend = c("16 DF", "6.8 DF"), col = c("red", "blue"), lty = 1, lwd = 2, cex = .8)
+```
+
+Podemos observar que não muda tanto assim. Em sequência, vamos realizar uma regressão local usando a função `loess()`\`:
+
+```{r}
+#plotting the points
+plot(age, wage, xlim = agelims, cex = .5, col = "darkgrey")
+
+#title of the plot
+title("Local Regression")
+
+#fitting with the span argument = .2
+fit <- loess(wage ~age, span = .2, data=Wage)
+#fitting with the span argument = .5
+fit2 <- loess(wage ~age, span = .5, data = Wage)
+
+#adding the lines compreheending the regressions
+lines(age.grid, predict(fit, data.frame(age = age.grid)), col = "red", lwd = 2)
+lines(age.grid, predict(fit2, data.frame(age = age.grid)), col = "blue", lwd = 2)
+#legends of the plot
+legend ("topright", legend = c("Span = 0.2", "Span = 0.5") ,
+col = c("red ", "blue "), lty = 1, lwd = 2, cex = .8)
+```
+
+Visualmente não observamos muita diferença entre o loess e smoothing spline/natural splines. O argumento "span" é a proporção das observações de vizinhos utilizada para ajustar a regressão (20% = span .2 ou 50% = span .5 das observações). Traudzindo, quanto maior o span mais suave é a cuva.
+
+## Generalised Additive Models
+
+Esta talvez seja a técnica mais "poderosa" utilizada no capítulo 7, uma vez que é possível estabelecer diferentes funções de base para os preditores *p* presentes no modelo.
+
+Começamos obtendo um GAM para predizer o salário (*wage*) usando uma spline natura do ano (*year*) e da idade (*age*) e educação como variável qualitativa. Por enquanto o autor ainda utiliza a função `lm()`\` presente no R base, porém mais pra frente necessitaremos da biblioteca `gam`.
+
+```{r}
+gam1 <- lm(wage ~ ns(age, 4) + ns(year, 4) + education, data = Wage)
+
+```
+
+```{r}
+library(gam)
+gam.m3 <- gam(wage ~ s(year, 4) + s(age, 5) + education, data = Wage)
+par(mfrow = c(1,3))
+plot.Gam(gam.m3, se = T, col = "blue")
+plot.Gam(gam1, se = T, col = "red")
+```
